@@ -1,7 +1,7 @@
 // eslint-disable-next-line max-classes-per-file
 import AWS from 'aws-sdk';
 import { LogStream, LogStreams, OutputLogEvent, OutputLogEvents } from 'aws-sdk/clients/cloudwatchlogs';
-import { eachDayOfInterval, format } from 'date-fns';
+import { eachDayOfInterval, format, getOverlappingDaysInIntervals } from 'date-fns';
 
 const WINDOW_SIZE = 900;
 
@@ -162,7 +162,7 @@ class ExhLogStream {
     return this.exhausted;
   }
 
-  async next(maxTs: number): Promise<OutputLogEvent | null> {
+  async next(maxTs?: number): Promise<OutputLogEvent | null> {
     if (this.exhausted) {
       return null;
     }
@@ -178,7 +178,7 @@ class ExhLogStream {
       this.holdValue = result.value;
     }
 
-    if (!this.holdValue.timestamp || this.holdValue.timestamp > maxTs) {
+    if (!this.holdValue.timestamp || (maxTs !== undefined && (this.holdValue.timestamp > maxTs))) {
       return null;
     }
     const tmp = this.holdValue;
@@ -255,17 +255,41 @@ class LogInterface {
     }
   }
 
+  async GetRequestLogs(requestId: string, from: Date, till: Date) {
+    let streams = await this.GetAllLogStreams(from, till);
+    let done = false;
+    let streamfound = false;
+    const allResults: OutputLogEvents = [];
+
+    while (!done) {
+      const reqs = streams.map(w => w.next());
+      const results = ((await Promise.all(reqs)).filter(r => r !== null) as OutputLogEvents);
+      if (results.length === 0) {
+        done = true;
+      }
+      if (!streamfound) {
+        const reqStream = results.findIndex(r => r.message && r.message.indexOf(requestId) !== -1);
+        if (reqStream !== undefined) {
+          streams = [streams[reqStream]];
+          allResults.push(results[reqStream]);
+          streamfound = true;
+        }
+      } else {
+        allResults.push(...results);
+      }
+    }
+    return allResults;
+  }
+
   GetCalls(): Date[] {
     return this.driver.calls;
   }
 }
 
-(async () => {
+async function getLogs(logGroup: string, from: Date, to: Date) {
   let totalTicks = 0;
   let concurrentSum = 0;
-  await authenticateAWS();
-
-  const log = new LogInterface('/aws/lambda/bior-fitbit-sync-task');
+  const log = new LogInterface(logGroup);
   let logCount = 0;
 
   const intervalHandle = setInterval(() => {
@@ -282,4 +306,18 @@ class LogInterface {
   console.log(log.GetCalls().length, ' calls');
   console.log('Average concurrent calls:', Math.round((concurrentSum / totalTicks) * 100) / 100);
   clearInterval(intervalHandle);
+}
+
+async function getRequestLogs(logGroup: string, requestId: string, from: Date, to: Date) {
+  const logs = new LogInterface(logGroup);
+
+  console.time('exec');
+  const data = await logs.GetRequestLogs('5b0cfe0f-859d-4d4d-afef-ce96731553c5', new Date('2022-06-25T18:20:04.827Z'), new Date('2022-06-25T18:20:10.219Z'));
+  console.timeEnd('exec');
+}
+
+(async () => {
+  await authenticateAWS();
+  // await getLogs('/aws/lambda/bior-fitbit-sync-task', new Date(2022, 5, 20, 9, 0, 0), new Date(2022, 5, 20, 9, 15, 0));
+  await getRequestLogs('/aws/lambda/bior-fitbit-sync-task', '5b0cfe0f-859d-4d4d-afef-ce96731553c5', new Date('2022-06-25T18:20:04.827Z'), new Date('2022-06-25T18:20:10.219Z'));
 })().catch(() => {});

@@ -68,7 +68,7 @@ class InsightLog {
     });
   }
 
-  async #query(logGroup: string, from: Epoch, to: Epoch): Promise<GetQueryResultsResponse> {
+  async #query(logGroup: string, query: string, from: Epoch, to: Epoch): Promise<GetQueryResultsResponse> {
     return new Promise((res, rej) => {
       const start = new Date().getTime();
       this.log.startQuery({
@@ -76,8 +76,7 @@ class InsightLog {
         startTime: from,
         endTime: to,
         limit: 10000,
-        queryString: `fields @timestamp, @message
-        | sort @timestamp asc`,
+        queryString: query,
       }, async (err, data) => {
         if (err) {
           console.log(err);
@@ -119,7 +118,8 @@ class InsightLog {
     const result = [];
 
     while (startWindow < to.getTime()) {
-      const windowResult = await this.#query(logGroup, startWindow, Math.min(to.getTime(), startWindow + this.window * 1000));
+      const windowResult = await this.#query(logGroup, `fields @timestamp, @message
+      | sort @timestamp asc`, startWindow, Math.min(to.getTime(), startWindow + this.window * 1000));
       result.push(windowResult);
       if (windowResult.results) {
         const numResults = windowResult.results.length;
@@ -158,11 +158,18 @@ class InsightLog {
     }
     return result;
   }
+
+  async getRequestLogs(logGroup: string, requestId: string, from: Date, to: Date) {
+    const result = await this.#query(logGroup, `fields @timestamp, @message
+      | filter @requestId = "${requestId}"
+      | sort @timestamp asc`, from.getTime(), to.getTime());
+
+    console.log(result);
+    return result;
+  }
 }
 
-(async () => {
-  await authenticateAWS();
-
+async function getLogsExample() {
   const logs = new InsightLog(900);
   let scanTotalBytes = 0;
 
@@ -177,4 +184,21 @@ class InsightLog {
   console.log('Total GB scanned:', Math.round((scanTotalBytes / 1024 / 1024 / 1024) * 100) / 100);
   console.log('Number of calls', logs.callLog.length);
   console.log('Average call duration:', Math.round((logs.callLog.reduce((prev, curr) => prev + curr, 0) / 1000 / logs.callLog.length) * 100) / 100, 's');
+}
+
+async function getRequestIdExample() {
+  const logs = new InsightLog(900);
+
+  console.time('exec');
+  const data = await logs.getRequestLogs('/aws/lambda/bior-fitbit-sync-task', '5b0cfe0f-859d-4d4d-afef-ce96731553c5', new Date('2022-06-25T18:20:04.827Z'), new Date('2022-06-25T18:20:10.219Z'));
+  console.timeEnd('exec');
+
+  if (data.statistics?.bytesScanned) {
+    console.log('MB Scanned:', data.statistics.bytesScanned / 1024 / 1024);
+  }
+}
+
+(async () => {
+  await authenticateAWS();
+  await getRequestIdExample();
 })().catch(() => {});
