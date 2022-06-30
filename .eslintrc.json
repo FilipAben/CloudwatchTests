@@ -1,0 +1,17 @@
+{
+  "extends": [
+    "@qompium/eslint-config-q-react"
+  ],
+  "rules": {
+    "linebreak-style": "off",
+    "@typescript-eslint/no-unused-vars": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "*.ts",
+        "*.tsx"
+      ] // Your TypeScript files extension
+    }
+  ]
+}
