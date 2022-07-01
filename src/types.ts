@@ -1,7 +1,7 @@
 export interface LogInterface {
-  getAPILogs(logGroup: string, from: Date, till: Date): Promise<Log[]>;
-  getTaskLogs(task: string, from: Date, till: Date): Promise<Log[]>;
-  getTaskExecutionLogs(task: string, executionId: string, from: Date, to: Date): Promise<Log[]>;
+  getAPILogs(from: Date, till: Date): AsyncGenerator<Log>;
+  getTaskLogs(task: string, from: Date, till: Date): AsyncGenerator<Log>;
+  getTaskExecutionLogs(task: string, executionId: string, from: Date, to: Date): AsyncGenerator<Log>;
 }
 
 export interface Log {

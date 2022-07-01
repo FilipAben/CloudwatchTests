@@ -14,7 +14,8 @@ export class CWLogInsightDriver {
 
   callLog: number[] = [];
 
-  constructor(startWindow: number, dynamic = true) {
+  constructor(log: AWS.CloudWatchLogs, startWindow: number, dynamic = true) {
+    this.log = log;
     this.window = startWindow;
     this.dynamicWindow = dynamic;
   }
@@ -151,51 +152,13 @@ export class CWLogInsightDriver {
     }
   }
 
-  async* getAllLogs(logGroup: string, from: Date, till: Date) AsyncGenerator<Log> {
-    
+  getAllLogs(logGroup: string, from: Date, to: Date): AsyncGenerator<Log> {
+    return this.getQueryLogs(logGroup, 'fields @timestamp, @message | sort @timestamp asc', from, to);
   }
 
-  async getRequestLogs(logGroup: string, requestId: string, from: Date, to: Date) {
-    return ge;
-    const result = await this.#query(logGroup, `fields @timestamp, @message
+  getRequestLogs(logGroup: string, requestId: string, from: Date, to: Date): AsyncGenerator<Log> {
+    return this.getQueryLogs(logGroup, `fields @timestamp, @message
       | filter @requestId = "${requestId}"
-      | sort @timestamp asc`, from.getTime(), to.getTime());
-
-    console.log(result);
-    return result;
+      | sort @timestamp asc`, from, to);
   }
 }
-
-async function getLogsExample() {
-  const logs = new InsightLog(900);
-  let scanTotalBytes = 0;
-
-  console.time('exec');
-  const data = await logs.getLogs('/aws/lambda/bior-fitbit-sync-task', new Date(2022, 5, 20, 9, 0, 0), new Date(2022, 5, 20, 9, 15, 0));
-  console.timeEnd('exec');
-
-  for (const d of data) {
-    scanTotalBytes += (d.statistics?.bytesScanned || 0);
-  }
-
-  console.log('Total GB scanned:', Math.round((scanTotalBytes / 1024 / 1024 / 1024) * 100) / 100);
-  console.log('Number of calls', logs.callLog.length);
-  console.log('Average call duration:', Math.round((logs.callLog.reduce((prev, curr) => prev + curr, 0) / 1000 / logs.callLog.length) * 100) / 100, 's');
-}
-
-async function getRequestIdExample() {
-  const logs = new InsightLog(900);
-
-  console.time('exec');
-  const data = await logs.getRequestLogs('/aws/lambda/bior-fitbit-sync-task', '5b0cfe0f-859d-4d4d-afef-ce96731553c5', new Date('2022-06-25T18:20:04.827Z'), new Date('2022-06-25T18:20:10.219Z'));
-  console.timeEnd('exec');
-
-  if (data.statistics?.bytesScanned) {
-    console.log('MB Scanned:', data.statistics.bytesScanned / 1024 / 1024);
-  }
-}
-
-(async () => {
-  await authenticateAWS();
-  await getRequestIdExample();
-})().catch(() => {});
