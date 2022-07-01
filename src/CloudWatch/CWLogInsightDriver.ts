@@ -1,43 +1,11 @@
 import AWS from 'aws-sdk';
 import { GetQueryResultsResponse, ResultRows } from 'aws-sdk/clients/cloudwatchlogs';
 import { parse } from 'date-fns';
+import { Log } from '../types';
 
 type Epoch = number;
 
-const env = ['AWS_KEY', 'AWS_KEY_SECRET', 'AWS_ROLE'];
-
-env.forEach(e => {
-  if (!process.env[e]) {
-    throw new Error(`Environment variable ${e} not defined! Need ${env.join(', ')}`);
-  }
-});
-
-function authenticateAWS() {
-  AWS.config.region = 'eu-central-1';
-  AWS.config.credentials = new AWS.Credentials(process.env.AWS_KEY || '', process.env.AWS_KEY_SECRET || '');
-  const sts = new AWS.STS();
-  return new Promise<void>((res, rej) => {
-    sts.assumeRole({
-      RoleArn: process.env.AWS_ROLE || '',
-      RoleSessionName: 'awssdk',
-    }, (err, data) => {
-      if (err) { // an error occurred
-        console.log('Cannot assume role');
-        console.log(err, err.stack);
-        rej();
-      } else { // successful response
-        AWS.config.update({
-          accessKeyId: data.Credentials?.AccessKeyId,
-          secretAccessKey: data.Credentials?.SecretAccessKey,
-          sessionToken: data.Credentials?.SessionToken,
-        });
-        res();
-      }
-    });
-  });
-}
-
-class InsightLog {
+export class CWLogInsightDriver {
   private window: number;
 
   private dynamicWindow = true;
@@ -68,7 +36,7 @@ class InsightLog {
     });
   }
 
-  async #query(logGroup: string, query: string, from: Epoch, to: Epoch): Promise<GetQueryResultsResponse> {
+  async #queryAndFetch(logGroup: string, query: string, from: Epoch, to: Epoch): Promise<GetQueryResultsResponse> {
     return new Promise((res, rej) => {
       const start = new Date().getTime();
       this.log.startQuery({
@@ -101,33 +69,58 @@ class InsightLog {
   }
 
   // eslint-disable-next-line class-methods-use-this
-  #recordToObject(record: ResultRows): Record<string, any> {
-    const result:Record<string, any> = {};
+  #recordToLog(record: ResultRows): Log {
+    const result:Log = { timestamp: new Date(), message: '', context: {} };
 
     for (const r of record) {
       if (r.field === undefined) {
         continue;
       }
-      result[r.field as string] = r.value;
+      if (r.field === '@timestamp') {
+        result.timestamp = new Date(`${r.field.split(' ').join('T')}Z`);
+      } else if (r.field === '@message') {
+        result.message = r.value || '';
+      } else {
+        result.context[r.field as string] = r.value;
+      }
     }
     return result;
   }
 
-  async getLogs(logGroup: string, from: Date, to: Date) {
+  async* getQueryLogs(logGroup: string, query: string, from: Date, to: Date): AsyncGenerator<Log> {
     let startWindow = from.getTime();
-    const result = [];
+    let lastPtr: string|null = null;
 
     while (startWindow < to.getTime()) {
-      const windowResult = await this.#query(logGroup, `fields @timestamp, @message
-      | sort @timestamp asc`, startWindow, Math.min(to.getTime(), startWindow + this.window * 1000));
-      result.push(windowResult);
-      if (windowResult.results) {
-        const numResults = windowResult.results.length;
-        console.log('startWindow =', new Date(startWindow), ', window size =', this.window, ', results =', numResults);
+      const windowResult = await this.#queryAndFetch(
+        logGroup,
+        'fields @timestamp, @message | sort @timestamp asc',
+        startWindow,
+        Math.min(to.getTime(), startWindow + this.window * 1000)
+      );
+      if (windowResult.results?.length) {
+        /* Convert to log line */
+        const logs = windowResult.results.map(r => this.#recordToLog(r));
+
+        /* remove duplicates */
+        if (lastPtr !== null) {
+          // eslint-disable-next-line no-loop-func
+          const idx = logs.findIndex(log => log.context['@ptr'] && log.context['@ptr'] === lastPtr);
+          console.log('Found ptr at index', idx);
+          if (idx !== undefined) {
+            logs.splice(0, idx + 1);
+          }
+        }
+        lastPtr = logs[logs.length - 1].context['@ptr'];
+
+        /* yield results */
+        for (const log of logs) {
+          yield log;
+        }
+        const numResults = logs.length;
         try {
-          const firstTs = new Date(`${this.#recordToObject(windowResult.results[0])['@timestamp'].split(' ').join('T')}Z`).getTime() / 1000;
-          const lastTs = new Date(`${this.#recordToObject(windowResult.results[numResults - 1])['@timestamp'].split(' ').join('T')}Z`).getTime() / 1000;
-          console.log('\t result window =', Math.round((lastTs - firstTs) * 100) / 100, 's');
+          const firstTs = logs[0].timestamp.getTime() / 1000;
+          const lastTs = logs[numResults - 1].timestamp.getTime() / 1000;
           if (!this.dynamicWindow) {
             if (numResults === 10000) {
               startWindow = lastTs * 1000;
@@ -156,10 +149,14 @@ class InsightLog {
         }
       }
     }
-    return result;
+  }
+
+  async* getAllLogs(logGroup: string, from: Date, till: Date) AsyncGenerator<Log> {
+    
   }
 
   async getRequestLogs(logGroup: string, requestId: string, from: Date, to: Date) {
+    return ge;
     const result = await this.#query(logGroup, `fields @timestamp, @message
       | filter @requestId = "${requestId}"
       | sort @timestamp asc`, from.getTime(), to.getTime());
