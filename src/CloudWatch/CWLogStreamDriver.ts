@@ -1,7 +1,6 @@
 // eslint-disable-next-line max-classes-per-file
-import AWS from 'aws-sdk';
 import CloudWatchLogs, { LogStream, LogStreams, OutputLogEvent, OutputLogEvents } from 'aws-sdk/clients/cloudwatchlogs';
-import { eachDayOfInterval, format, getOverlappingDaysInIntervals } from 'date-fns';
+import { eachDayOfInterval, format } from 'date-fns';
 import { Log } from '../types';
 
 class ExhLogStream {
