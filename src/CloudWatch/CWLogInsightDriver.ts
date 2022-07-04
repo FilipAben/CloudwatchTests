@@ -1,6 +1,5 @@
 import AWS from 'aws-sdk';
 import { GetQueryResultsResponse, ResultRows } from 'aws-sdk/clients/cloudwatchlogs';
-import { parse } from 'date-fns';
 import { Log } from '../types';
 
 type Epoch = number;
@@ -10,7 +9,7 @@ export class CWLogInsightDriver {
 
   private dynamicWindow = true;
 
-  private log: AWS.CloudWatchLogs = new AWS.CloudWatchLogs();
+  private log: AWS.CloudWatchLogs;
 
   callLog: number[] = [];
 
@@ -41,7 +40,7 @@ export class CWLogInsightDriver {
     return new Promise((res, rej) => {
       const start = new Date().getTime();
       this.log.startQuery({
-        logGroupName: '/aws/lambda/bior-fitbit-sync-task',
+        logGroupName: logGroup,
         startTime: from,
         endTime: to,
         limit: 10000,
@@ -78,7 +77,7 @@ export class CWLogInsightDriver {
         continue;
       }
       if (r.field === '@timestamp') {
-        result.timestamp = new Date(`${r.field.split(' ').join('T')}Z`);
+        result.timestamp = new Date(`${r.value?.split(' ').join('T')}Z`);
       } else if (r.field === '@message') {
         result.message = r.value || '';
       } else {
@@ -103,11 +102,10 @@ export class CWLogInsightDriver {
         /* Convert to log line */
         const logs = windowResult.results.map(r => this.#recordToLog(r));
 
-        /* remove duplicates */
+        /* remove duplicates by checking the @ptr value */
         if (lastPtr !== null) {
           // eslint-disable-next-line no-loop-func
           const idx = logs.findIndex(log => log.context['@ptr'] && log.context['@ptr'] === lastPtr);
-          console.log('Found ptr at index', idx);
           if (idx !== undefined) {
             logs.splice(0, idx + 1);
           }
@@ -152,7 +150,7 @@ export class CWLogInsightDriver {
     }
   }
 
-  getAllLogs(logGroup: string, from: Date, to: Date): AsyncGenerator<Log> {
+  getAllLogs(logGroup: string, from: Date, to: Date, _useDayPrefix?: boolean): AsyncGenerator<Log> {
     return this.getQueryLogs(logGroup, 'fields @timestamp, @message | sort @timestamp asc', from, to);
   }
 
